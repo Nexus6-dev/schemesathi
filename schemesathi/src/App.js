@@ -252,6 +252,100 @@ function schemeMatches(form, scheme) {
   );
 }
 
+function getMatchDetails(form, scheme) {
+  let score = 0;
+  const reasons = [];
+
+  const selectedState = form.state
+    .trim()
+    .toLowerCase();
+
+  const stateMatches =
+    scheme.states.includes("ALL") ||
+    scheme.states.includes(selectedState);
+
+  if (stateMatches) {
+    score += 25;
+
+    if (scheme.states.includes("ALL")) {
+      reasons.push(
+        "This scheme is available across India."
+      );
+    } else {
+      reasons.push(
+        "This scheme is available in your state."
+      );
+    }
+  }
+
+  const ageMatches =
+    Number(form.age) >= scheme.minimumAge;
+
+  if (ageMatches) {
+    score += 20;
+
+    if (scheme.minimumAge > 0) {
+      reasons.push(
+        `You meet the minimum age requirement of ${scheme.minimumAge} years.`
+      );
+    } else {
+      reasons.push(
+        "No minimum age restriction was listed."
+      );
+    }
+  }
+
+  const businessTypeMatches =
+    scheme.businessTypes.includes("ALL") ||
+    scheme.businessTypes.includes(form.businessType);
+
+  if (businessTypeMatches) {
+    score += 25;
+    reasons.push(
+      "Your business type is supported."
+    );
+  }
+
+  const genderIsMatch =
+    genderMatches(form, scheme);
+
+  if (genderIsMatch) {
+    score += 15;
+
+    if (scheme.targetGender) {
+      reasons.push(
+        "Your gender matches the listed target group."
+      );
+    } else {
+      reasons.push(
+        "No gender restriction was listed."
+      );
+    }
+  }
+
+  const categoryIsMatch =
+    categoryMatches(form, scheme);
+
+  if (categoryIsMatch) {
+    score += 15;
+
+    if (scheme.targetCommunity) {
+      reasons.push(
+        "Your social category matches the listed target group."
+      );
+    } else {
+      reasons.push(
+        "No social category restriction was listed."
+      );
+    }
+  }
+
+  return {
+    matchScore: Math.min(score, 100),
+    matchReasons: reasons
+  };
+}
+
 function App() {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
@@ -369,9 +463,19 @@ function App() {
       return;
     }
 
-    const matchingSchemes = schemes.filter(
-      (scheme) => schemeMatches(form, scheme)
-    );
+    const matchingSchemes = schemes
+      .filter((scheme) =>
+        schemeMatches(form, scheme)
+      )
+      .map((scheme) => ({
+        ...scheme,
+        ...getMatchDetails(form, scheme)
+      }))
+      .sort(
+        (firstScheme, secondScheme) =>
+          secondScheme.matchScore -
+          firstScheme.matchScore
+      );
 
     setMatches(matchingSchemes);
     setSearched(true);
@@ -735,6 +839,33 @@ function App() {
                   <h3 style={{ color: "#173b67" }}>
                     {scheme.name}
                   </h3>
+
+                  <p
+                    style={{
+                      display: "inline-block",
+                      padding: "8px 12px",
+                      borderRadius: "20px",
+                      backgroundColor: "#dff5e3",
+                      color: "#216e39",
+                      fontWeight: "bold"
+                    }}
+                  >
+                    Match score: {scheme.matchScore}%
+                  </p>
+
+                  <h4>
+                    Why this matches
+                  </h4>
+
+                  <ul>
+                    {scheme.matchReasons.map(
+                      (reason, index) => (
+                        <li key={index}>
+                          {reason}
+                        </li>
+                      )
+                    )}
+                  </ul>
 
                   <p>
                     <strong>
