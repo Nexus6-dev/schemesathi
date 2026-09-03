@@ -1,5 +1,20 @@
 import { useEffect, useState } from "react";
 import Papa from "papaparse";
+import Auth from "./Auth";
+import SavedSchemes from "./SavedSchemes";
+
+import {
+  onAuthStateChanged,
+  signOut
+} from "firebase/auth";
+
+import { auth, db } from "./firebase";
+
+import {
+  doc,
+  setDoc,
+  serverTimestamp
+} from "firebase/firestore";
 
 function parseMinimumAge(value) {
   const text = String(value || "");
@@ -13,7 +28,7 @@ function getStates(value) {
 
   if (
     text.includes("india") ||
-    text.includes("all") ||
+    /\b(all|any)\b/.test(text) ||
     text.includes("pan india")
   ) {
     return ["ALL"];
@@ -30,9 +45,8 @@ function getBusinessTypes(value) {
   const types = [];
 
   if (
-    text.includes("any") ||
-    text.includes("all") ||
-    text.includes("all type")
+    /\b(any|all)\b/.test(text) ||
+    /\ball types?\b/.test(text)
   ) {
     return ["ALL"];
   }
@@ -76,51 +90,73 @@ function getBusinessTypes(value) {
 function convertCsvRow(row, index) {
   return {
     id: row["Scheme Name"] || `scheme-${index}`,
-    name: row["Scheme Name"] || "Unnamed Scheme",
-    minimumAge: parseMinimumAge(row["Minimum Age"]),
-    states: getStates(row["Target Location"]),
+
+    name:
+      row["Scheme Name"] ||
+      "Unnamed Scheme",
+
+    minimumAge: parseMinimumAge(
+      row["Minimum Age"]
+    ),
+
+    states: getStates(
+      row["Target Location"]
+    ),
+
     businessTypes: getBusinessTypes(
       row["Business Type / Industry"]
     ),
-    targetGender: String(row["Target Gender"] || "").toLowerCase(),
+
+    targetGender: String(
+      row["Target Gender"] || ""
+    ).toLowerCase(),
+
     targetCommunity: String(
       row["Target Community / Category"] || ""
     ).toLowerCase(),
-    benefit: row["Financial Benefit"] || "Benefit information unavailable",
+
+    benefit:
+      row["Financial Benefit"] ||
+      "Benefit information unavailable",
+
     eligibility:
       row["Plain-Text Eligibility Summary"] ||
       "Eligibility information unavailable",
+
     documents:
       row["Documents Required"] ||
       "Document information unavailable",
+
     howToApply:
       row["How to Apply"] ||
       "Application information unavailable",
-    link: row["Official Link"] || "#"
+
+    link:
+      row["Official Link"] ||
+      "#"
   };
 }
 
 function genderMatches(form, scheme) {
   const text = scheme.targetGender;
 
-  if (!text || text.includes("any") || text.includes("all")) {
+  if (
+    !text ||
+    /\b(any|all)\b/.test(text)
+  ) {
     return true;
   }
 
   if (
     form.gender === "Woman" &&
-    (text.includes("woman") ||
-      text.includes("women") ||
-      text.includes("female"))
+    /\b(woman|women|female)\b/.test(text)
   ) {
     return true;
   }
 
   if (
     form.gender === "Man" &&
-    (text.includes("man") ||
-      text.includes("men") ||
-      text.includes("male"))
+    /\b(man|men|male)\b/.test(text)
   ) {
     return true;
   }
@@ -131,41 +167,53 @@ function genderMatches(form, scheme) {
 function categoryMatches(form, scheme) {
   const text = scheme.targetCommunity;
 
-  if (!text || text.includes("any") || text.includes("all")) {
+  if (
+    !text ||
+    /\b(any|all)\b/.test(text)
+  ) {
     return true;
   }
 
   if (
     form.socialCategory === "SC" &&
-    (text.includes("sc") || text.includes("scheduled caste"))
+    (
+      /\bsc\b/.test(text) ||
+      text.includes("scheduled caste")
+    )
   ) {
     return true;
   }
 
   if (
     form.socialCategory === "ST" &&
-    (text.includes("st") || text.includes("scheduled tribe"))
+    (
+      /\bst\b/.test(text) ||
+      text.includes("scheduled tribe")
+    )
   ) {
     return true;
   }
 
   if (
     form.socialCategory === "OBC" &&
-    (text.includes("obc") || text.includes("backward"))
+    (
+      /\bobc\b/.test(text) ||
+      text.includes("backward class")
+    )
   ) {
     return true;
   }
 
   if (
     form.socialCategory === "General" &&
-    text.includes("general")
+    /\bgeneral\b/.test(text)
   ) {
     return true;
   }
 
   if (
     form.gender === "Woman" &&
-    (text.includes("woman") || text.includes("women"))
+    /\b(woman|women|female)\b/.test(text)
   ) {
     return true;
   }
@@ -174,7 +222,9 @@ function categoryMatches(form, scheme) {
 }
 
 function schemeMatches(form, scheme) {
-  const selectedState = form.state.toLowerCase();
+  const selectedState = form.state
+    .trim()
+    .toLowerCase();
 
   const stateMatches =
     scheme.states.includes("ALL") ||
@@ -187,25 +237,26 @@ function schemeMatches(form, scheme) {
     scheme.businessTypes.includes("ALL") ||
     scheme.businessTypes.includes(form.businessType);
 
-  const genderIsRelevant = scheme.targetGender.length > 0;
-  const communityIsRelevant = scheme.targetCommunity.length > 0;
+  const genderMatchesResult =
+    genderMatches(form, scheme);
 
-  const genderIsMatch =
-    !genderIsRelevant || genderMatches(form, scheme);
-
-  const categoryIsMatch =
-    !communityIsRelevant || categoryMatches(form, scheme);
+  const categoryMatchesResult =
+    categoryMatches(form, scheme);
 
   return (
     stateMatches &&
     ageMatches &&
     businessTypeMatches &&
-    genderIsMatch &&
-    categoryIsMatch
+    genderMatchesResult &&
+    categoryMatchesResult
   );
 }
 
 function App() {
+  const [user, setUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [view, setView] = useState("matcher");
+
   const [form, setForm] = useState({
     state: "",
     age: "",
@@ -217,14 +268,35 @@ function App() {
   const [schemes, setSchemes] = useState([]);
   const [matches, setMatches] = useState([]);
   const [searched, setSearched] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+
+  const [loadingSchemes, setLoadingSchemes] =
+    useState(true);
+
+  const [schemeError, setSchemeError] =
+    useState("");
+
+  const [saveMessage, setSaveMessage] =
+    useState(null);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      (currentUser) => {
+        setUser(currentUser);
+        setAuthReady(true);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     fetch("/data/schemes.csv")
       .then((response) => {
         if (!response.ok) {
-          throw new Error("Could not find schemes.csv");
+          throw new Error(
+            "Could not find schemes.csv"
+          );
         }
 
         return response.text();
@@ -233,22 +305,46 @@ function App() {
         Papa.parse(csvText, {
           header: true,
           skipEmptyLines: true,
+
           complete: (result) => {
             const convertedSchemes = result.data
-              .map((row, index) => convertCsvRow(row, index))
-              .filter((scheme) => scheme.name !== "Unnamed Scheme");
+              .map((row, index) =>
+                convertCsvRow(row, index)
+              )
+              .filter(
+                (scheme) =>
+                  scheme.name !== "Unnamed Scheme"
+              );
 
             setSchemes(convertedSchemes);
-            setLoading(false);
+            setLoadingSchemes(false);
+          },
+
+          error: (error) => {
+            console.error(
+              "CSV parsing error:",
+              error
+            );
+
+            setSchemeError(
+              "The scheme file could not be read."
+            );
+
+            setLoadingSchemes(false);
           }
         });
       })
       .catch((error) => {
-        console.error(error);
-        setError(
+        console.error(
+          "Scheme loading error:",
+          error
+        );
+
+        setSchemeError(
           "The scheme file could not be loaded. Check public/data/schemes.csv."
         );
-        setLoading(false);
+
+        setLoadingSchemes(false);
       });
   }, []);
 
@@ -259,64 +355,236 @@ function App() {
     });
   }
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
 
-    const matchingSchemes = schemes.filter((scheme) =>
-      schemeMatches(form, scheme)
+    setSaveMessage(null);
+
+    if (!user || !user.uid) {
+      setSaveMessage({
+        type: "error",
+        text: "Please login before submitting your profile."
+      });
+
+      return;
+    }
+
+    const matchingSchemes = schemes.filter(
+      (scheme) => schemeMatches(form, scheme)
     );
 
     setMatches(matchingSchemes);
     setSearched(true);
+
+    try {
+      await setDoc(
+        doc(db, "users", user.uid),
+        {
+          email: user.email || "",
+
+          profile: {
+            state: form.state,
+            age: form.age,
+            gender: form.gender,
+            socialCategory: form.socialCategory,
+            businessType: form.businessType
+          },
+
+          updatedAt: serverTimestamp()
+        },
+        {
+          merge: true
+        }
+      );
+
+      setSaveMessage({
+        type: "success",
+        text: "Your profile has been saved successfully."
+      });
+    } catch (error) {
+      console.error(
+        "Firestore save error:",
+        error
+      );
+
+      setSaveMessage({
+        type: "error",
+        text:
+          "Profile could not be saved. Firebase error: " +
+          error.code
+      });
+    }
+  }
+
+  async function handleSaveScheme(scheme) {
+    try {
+      const safeSchemeId = scheme.id.replace(
+        /[^a-zA-Z0-9_-]/g,
+        "_"
+      );
+
+      await setDoc(
+        doc(
+          db,
+          "users",
+          user.uid,
+          "savedSchemes",
+          safeSchemeId
+        ),
+        {
+          schemeId: scheme.id,
+          name: scheme.name,
+          benefit: scheme.benefit,
+          link: scheme.link,
+          savedAt: serverTimestamp()
+        }
+      );
+
+      setSaveMessage({
+        type: "success",
+        text: `${scheme.name} saved successfully.`
+      });
+    } catch (error) {
+      console.error(
+        "Save scheme error:",
+        error
+      );
+
+      setSaveMessage({
+        type: "error",
+        text: "This scheme could not be saved."
+      });
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await signOut(auth);
+      setUser(null);
+      setView("matcher");
+    } catch (error) {
+      console.error(
+        "Logout error:",
+        error
+      );
+    }
+  }
+
+  if (!authReady) {
+    return (
+      <div style={centerStyle}>
+        <h2>Checking login...</h2>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Auth onLogin={setUser} />;
+  }
+
+  if (view === "saved") {
+    return (
+      <SavedSchemes
+        user={user}
+        onBack={() => setView("matcher")}
+      />
+    );
   }
 
   return (
     <div style={pageStyle}>
       <div style={cardStyle}>
-        <h1 style={{ color: "#173b67" }}>
-          SchemeSaathi
-        </h1>
+        <div style={headerStyle}>
+          <div>
+            <h1 style={{ color: "#173b67" }}>
+              SchemeSaathi
+            </h1>
 
-        <p style={{ color: "#555", fontSize: "18px" }}>
-          Find government schemes that may support your business.
+            <p style={{ color: "#555" }}>
+              Find government schemes that may support your business.
+            </p>
+          </div>
+
+          <div style={headerButtonsStyle}>
+            <button
+              type="button"
+              onClick={() => setView("saved")}
+              style={savedButtonStyle}
+            >
+              Saved Schemes
+            </button>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              style={logoutButtonStyle}
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+
+        <p style={{ color: "#555" }}>
+          Logged in as: {user.email}
         </p>
 
-        {loading && <p>Loading schemes...</p>}
+        {loadingSchemes && (
+          <p>Loading schemes...</p>
+        )}
 
-        {error && (
-          <p style={{ color: "red" }}>
-            {error}
+        {schemeError && (
+          <p style={{ color: "#c62828" }}>
+            {schemeError}
           </p>
         )}
 
-        {!loading && !error && (
+        {!loadingSchemes && !schemeError && (
           <p style={{ color: "#216e39" }}>
             {schemes.length} schemes loaded successfully.
           </p>
         )}
 
+        {saveMessage && (
+          <div
+            style={{
+              padding: "12px",
+              marginBottom: "20px",
+              borderRadius: "8px",
+              backgroundColor:
+                saveMessage.type === "success"
+                  ? "#e8f5e9"
+                  : "#ffebee",
+              color:
+                saveMessage.type === "success"
+                  ? "#216e39"
+                  : "#c62828"
+            }}
+          >
+            {saveMessage.text}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit}>
           <label>
-            <strong>Which state are you from?</strong>
+            <strong>
+              Which state are you from?
+            </strong>
           </label>
 
-          <select
+          <input
+            type="text"
             name="state"
             value={form.state}
             onChange={handleChange}
             required
-            style={selectStyle}
-          >
-            <option value="">Select your state</option>
-            <option value="Assam">Assam</option>
-            <option value="Bihar">Bihar</option>
-            <option value="Maharashtra">Maharashtra</option>
-            <option value="Uttar Pradesh">Uttar Pradesh</option>
-            <option value="West Bengal">West Bengal</option>
-          </select>
+            placeholder="Example: Assam"
+            style={inputStyle}
+          />
 
           <label>
-            <strong>What is your age?</strong>
+            <strong>
+              What is your age?
+            </strong>
           </label>
 
           <input
@@ -331,7 +599,9 @@ function App() {
           />
 
           <label>
-            <strong>What is your gender?</strong>
+            <strong>
+              What is your gender?
+            </strong>
           </label>
 
           <select
@@ -341,14 +611,27 @@ function App() {
             required
             style={selectStyle}
           >
-            <option value="">Select gender</option>
-            <option value="Woman">Woman</option>
-            <option value="Man">Man</option>
-            <option value="Other">Other</option>
+            <option value="">
+              Select gender
+            </option>
+
+            <option value="Woman">
+              Woman
+            </option>
+
+            <option value="Man">
+              Man
+            </option>
+
+            <option value="Other">
+              Other
+            </option>
           </select>
 
           <label>
-            <strong>What is your social category?</strong>
+            <strong>
+              What is your social category?
+            </strong>
           </label>
 
           <select
@@ -358,16 +641,35 @@ function App() {
             required
             style={selectStyle}
           >
-            <option value="">Select category</option>
-            <option value="SC">SC</option>
-            <option value="ST">ST</option>
-            <option value="OBC">OBC</option>
-            <option value="General">General</option>
-            <option value="Other">Other</option>
+            <option value="">
+              Select category
+            </option>
+
+            <option value="SC">
+              SC
+            </option>
+
+            <option value="ST">
+              ST
+            </option>
+
+            <option value="OBC">
+              OBC
+            </option>
+
+            <option value="General">
+              General
+            </option>
+
+            <option value="Other">
+              Other
+            </option>
           </select>
 
           <label>
-            <strong>What type of business do you have?</strong>
+            <strong>
+              What type of business do you have?
+            </strong>
           </label>
 
           <select
@@ -377,17 +679,37 @@ function App() {
             required
             style={selectStyle}
           >
-            <option value="">Select business type</option>
-            <option value="Manufacturing">Manufacturing</option>
-            <option value="Services">Services</option>
-            <option value="Trading">Trading</option>
-            <option value="Agriculture">Agriculture</option>
-            <option value="Technology">Technology</option>
+            <option value="">
+              Select business type
+            </option>
+
+            <option value="Manufacturing">
+              Manufacturing
+            </option>
+
+            <option value="Services">
+              Services
+            </option>
+
+            <option value="Trading">
+              Trading
+            </option>
+
+            <option value="Agriculture">
+              Agriculture
+            </option>
+
+            <option value="Technology">
+              Technology
+            </option>
           </select>
 
           <button
             type="submit"
-            disabled={loading || schemes.length === 0}
+            disabled={
+              loadingSchemes ||
+              schemes.length === 0
+            }
             style={buttonStyle}
           >
             Find Matching Schemes
@@ -396,7 +718,9 @@ function App() {
 
         {searched && (
           <div style={{ marginTop: "30px" }}>
-            <h2>Matching Schemes</h2>
+            <h2>
+              Matching Schemes ({matches.length})
+            </h2>
 
             {matches.length === 0 ? (
               <p>
@@ -404,32 +728,61 @@ function App() {
               </p>
             ) : (
               matches.map((scheme) => (
-                <div key={scheme.id} style={schemeStyle}>
+                <div
+                  key={scheme.id}
+                  style={schemeStyle}
+                >
                   <h3 style={{ color: "#173b67" }}>
                     {scheme.name}
                   </h3>
 
                   <p>
-                    <strong>Benefit:</strong> {scheme.benefit}
+                    <strong>
+                      Benefit:
+                    </strong>{" "}
+                    {scheme.benefit}
                   </p>
 
                   <p>
-                    <strong>Eligibility summary:</strong>{" "}
+                    <strong>
+                      Eligibility:
+                    </strong>{" "}
                     {scheme.eligibility}
                   </p>
 
                   <p>
-                    <strong>Documents:</strong>{" "}
+                    <strong>
+                      Documents:
+                    </strong>{" "}
                     {scheme.documents}
                   </p>
 
-                  <a
-                    href={scheme.link}
-                    target="_blank"
-                    rel="noreferrer"
+                  <p>
+                    <strong>
+                      How to apply:
+                    </strong>{" "}
+                    {scheme.howToApply}
+                  </p>
+
+                  {scheme.link !== "#" && (
+                    <a
+                      href={scheme.link}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Visit Official Website
+                    </a>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleSaveScheme(scheme)
+                    }
+                    style={saveSchemeButtonStyle}
                   >
-                    Visit Official Website
-                  </a>
+                    Save This Scheme
+                  </button>
                 </div>
               ))
             )}
@@ -440,6 +793,14 @@ function App() {
   );
 }
 
+const centerStyle = {
+  minHeight: "100vh",
+  display: "flex",
+  justifyContent: "center",
+  alignItems: "center",
+  fontFamily: "Arial, sans-serif"
+};
+
 const pageStyle = {
   minHeight: "100vh",
   backgroundColor: "#f4f7fb",
@@ -448,12 +809,25 @@ const pageStyle = {
 };
 
 const cardStyle = {
-  maxWidth: "700px",
+  maxWidth: "750px",
   margin: "0 auto",
   backgroundColor: "white",
   padding: "32px",
   borderRadius: "16px",
   boxShadow: "0 4px 20px rgba(0, 0, 0, 0.08)"
+};
+
+const headerStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: "20px"
+};
+
+const headerButtonsStyle = {
+  display: "flex",
+  gap: "8px",
+  flexWrap: "wrap"
 };
 
 const selectStyle = {
@@ -488,6 +862,35 @@ const buttonStyle = {
   border: "none",
   borderRadius: "8px",
   fontSize: "17px",
+  cursor: "pointer"
+};
+
+const savedButtonStyle = {
+  padding: "10px 14px",
+  backgroundColor: "#1769aa",
+  color: "white",
+  border: "none",
+  borderRadius: "8px",
+  cursor: "pointer"
+};
+
+const logoutButtonStyle = {
+  padding: "10px 14px",
+  backgroundColor: "#eeeeee",
+  color: "#333",
+  border: "none",
+  borderRadius: "8px",
+  cursor: "pointer"
+};
+
+const saveSchemeButtonStyle = {
+  display: "block",
+  marginTop: "15px",
+  padding: "10px 16px",
+  backgroundColor: "#f59e0b",
+  color: "white",
+  border: "none",
+  borderRadius: "8px",
   cursor: "pointer"
 };
 
