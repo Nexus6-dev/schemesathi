@@ -372,6 +372,15 @@ function App() {
   const [saveMessage, setSaveMessage] =
     useState(null);
 
+  const [explanations, setExplanations] =
+    useState({});
+
+  const [explanationLoading, setExplanationLoading] =
+    useState({});
+
+  const [explanationErrors, setExplanationErrors] =
+    useState({});
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(
       auth,
@@ -479,6 +488,9 @@ function App() {
 
     setMatches(matchingSchemes);
     setSearched(true);
+    setExplanations({});
+    setExplanationLoading({});
+    setExplanationErrors({});
 
     try {
       await setDoc(
@@ -517,6 +529,73 @@ function App() {
           "Profile could not be saved. Firebase error: " +
           error.code
       });
+    }
+  }
+
+  async function handleExplainScheme(scheme) {
+    const schemeId = scheme.id;
+
+    setExplanationLoading((current) => ({
+      ...current,
+      [schemeId]: true
+    }));
+
+    setExplanationErrors((current) => ({
+      ...current,
+      [schemeId]: ""
+    }));
+
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/explain",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            scheme: scheme,
+            profile: form,
+            language: "English"
+          })
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.explanation) {
+        throw new Error(
+          data.error ||
+            data.details ||
+            "Could not generate an explanation."
+        );
+      }
+
+      setExplanations((current) => ({
+        ...current,
+        [schemeId]: data.explanation
+      }));
+    } catch (error) {
+      console.error(
+        "Explain scheme error:",
+        error
+      );
+
+      const readableError =
+        error.message === "Failed to fetch"
+          ? "Could not reach the explanation server. Make sure the backend is running on port 5000."
+          : error.message ||
+            "The explanation could not be generated. Please try again.";
+
+      setExplanationErrors((current) => ({
+        ...current,
+        [schemeId]: readableError
+      }));
+    } finally {
+      setExplanationLoading((current) => ({
+        ...current,
+        [schemeId]: false
+      }));
     }
   }
 
@@ -914,6 +993,46 @@ function App() {
                   >
                     Save This Scheme
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleExplainScheme(scheme)
+                    }
+                    disabled={
+                      explanationLoading[scheme.id]
+                    }
+                    style={explainButtonStyle}
+                  >
+                    Explain with AI
+                  </button>
+
+                  {explanationLoading[scheme.id] && (
+                    <p style={{ color: "#555" }}>
+                      Generating explanation...
+                    </p>
+                  )}
+
+                  {explanationErrors[scheme.id] && (
+                    <p style={{ color: "#c62828" }}>
+                      {explanationErrors[scheme.id]}
+                    </p>
+                  )}
+
+                  {explanations[scheme.id] && (
+                    <div style={explanationBoxStyle}>
+                      <h4>
+                        AI explanation
+                      </h4>
+                      <p
+                        style={{
+                          whiteSpace: "pre-wrap"
+                        }}
+                      >
+                        {explanations[scheme.id]}
+                      </p>
+                    </div>
+                  )}
                 </div>
               ))
             )}
@@ -1023,6 +1142,25 @@ const saveSchemeButtonStyle = {
   border: "none",
   borderRadius: "8px",
   cursor: "pointer"
+};
+
+const explainButtonStyle = {
+  display: "block",
+  marginTop: "10px",
+  padding: "10px 16px",
+  backgroundColor: "#1769aa",
+  color: "white",
+  border: "none",
+  borderRadius: "8px",
+  cursor: "pointer"
+};
+
+const explanationBoxStyle = {
+  marginTop: "15px",
+  padding: "14px",
+  borderRadius: "8px",
+  backgroundColor: "#ffffff",
+  border: "1px solid #c5d9ec"
 };
 
 const schemeStyle = {
