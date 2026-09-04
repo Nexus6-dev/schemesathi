@@ -658,8 +658,10 @@ function App() {
 
   if (!authReady) {
     return (
-      <div style={centerStyle}>
+      <div className="ss-boot">
+        <div className="ss-boot-dot" />
         <h2>Checking login...</h2>
+        <p>Preparing a trusted space to find schemes for you.</p>
       </div>
     );
   }
@@ -678,24 +680,24 @@ function App() {
   }
 
   return (
-    <div style={pageStyle}>
-      <div style={cardStyle}>
-        <div style={headerStyle}>
-          <div>
-            <h1 style={{ color: "#173b67" }}>
-              SchemeSaathi
-            </h1>
-
-            <p style={{ color: "#555" }}>
-              Find government schemes that may support your business.
-            </p>
+    <div className="ss-page">
+      <div className="ss-shell">
+        <header className="ss-nav">
+          <div className="ss-brand">
+            <div className="ss-mark">S</div>
+            <div>
+              <h1>SchemeSaathi</h1>
+              <p className="ss-user">
+                Logged in as: {user.email}
+              </p>
+            </div>
           </div>
 
-          <div style={headerButtonsStyle}>
+          <div className="ss-nav-actions">
             <button
               type="button"
               onClick={() => setView("saved")}
-              style={savedButtonStyle}
+              className="ss-btn ss-btn--navy"
             >
               Saved Schemes
             </button>
@@ -703,508 +705,369 @@ function App() {
             <button
               type="button"
               onClick={handleLogout}
-              style={logoutButtonStyle}
+              className="ss-btn ss-btn--ghost"
             >
               Logout
             </button>
           </div>
-        </div>
+        </header>
 
-        <p style={{ color: "#555" }}>
-          Logged in as: {user.email}
-        </p>
+        <section className="ss-hero">
+          <div>
+            <span className="ss-kicker">
+              Your scheme companion
+            </span>
+            <h2>
+              Find the right government scheme for your business
+            </h2>
+            <p className="ss-hero-copy">
+              Answer a few simple questions about your profile.
+              We will match schemes that may support your work,
+              show why they fit, and help you save the useful ones.
+            </p>
+            <a href="#scheme-profile" className="ss-btn ss-btn--primary">
+              Find my schemes
+            </a>
+          </div>
+
+          <aside className="ss-hero-aside">
+            <h3>Clear, personal matches</h3>
+            <p>
+              See a match score, eligibility notes, documents,
+              official links, and an AI explanation in your language.
+            </p>
+            <p className="ss-hero-stat">
+              {loadingSchemes
+                ? "Loading the scheme library..."
+                : schemeError
+                ? "Scheme library needs attention"
+                : `${schemes.length} schemes ready to match`}
+            </p>
+          </aside>
+        </section>
 
         {loadingSchemes && (
-          <p>Loading schemes...</p>
+          <div className="ss-banner ss-banner--info">
+            Loading schemes...
+          </div>
         )}
 
         {schemeError && (
-          <p style={{ color: "#c62828" }}>
+          <div className="ss-banner ss-banner--error">
             {schemeError}
-          </p>
+          </div>
         )}
 
         {!loadingSchemes && !schemeError && (
-          <p style={{ color: "#216e39" }}>
+          <div className="ss-banner ss-banner--success">
             {schemes.length} schemes loaded successfully.
-          </p>
+          </div>
         )}
 
         {saveMessage && (
           <div
-            style={{
-              padding: "12px",
-              marginBottom: "20px",
-              borderRadius: "8px",
-              backgroundColor:
-                saveMessage.type === "success"
-                  ? "#e8f5e9"
-                  : "#ffebee",
-              color:
-                saveMessage.type === "success"
-                  ? "#216e39"
-                  : "#c62828"
-            }}
+            className={
+              saveMessage.type === "success"
+                ? "ss-banner ss-banner--success"
+                : "ss-banner ss-banner--error"
+            }
           >
             {saveMessage.text}
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
-          <label>
-            <strong>
-              Which state are you from?
-            </strong>
-          </label>
+        <section id="scheme-profile" className="ss-section">
+          <div className="ss-section-head">
+            <h2>Tell us about you</h2>
+            <p>
+              Five short steps. We use this only to match schemes
+              that fit your state, age, and business.
+            </p>
+          </div>
 
-          <input
-            type="text"
-            name="state"
-            value={form.state}
-            onChange={handleChange}
-            required
-            placeholder="Example: Assam"
-            style={inputStyle}
-          />
+          <form onSubmit={handleSubmit} className="ss-form">
+            <div className="ss-field">
+              <span className="ss-step">Step 1</span>
+              <label htmlFor="state">
+                Which state are you from?
+              </label>
+              <input
+                id="state"
+                type="text"
+                name="state"
+                value={form.state}
+                onChange={handleChange}
+                required
+                placeholder="Example: Assam"
+                className="ss-input"
+              />
+            </div>
 
-          <label>
-            <strong>
-              What is your age?
-            </strong>
-          </label>
+            <div className="ss-field">
+              <span className="ss-step">Step 2</span>
+              <label htmlFor="age">
+                What is your age?
+              </label>
+              <input
+                id="age"
+                type="number"
+                name="age"
+                value={form.age}
+                onChange={handleChange}
+                min="1"
+                required
+                placeholder="Enter your age"
+                className="ss-input"
+              />
+            </div>
 
-          <input
-            type="number"
-            name="age"
-            value={form.age}
-            onChange={handleChange}
-            min="1"
-            required
-            placeholder="Enter your age"
-            style={inputStyle}
-          />
+            <div className="ss-field">
+              <span className="ss-step">Step 3</span>
+              <label htmlFor="gender">
+                What is your gender?
+              </label>
+              <select
+                id="gender"
+                name="gender"
+                value={form.gender}
+                onChange={handleChange}
+                required
+                className="ss-select"
+              >
+                <option value="">
+                  Select gender
+                </option>
+                <option value="Woman">Woman</option>
+                <option value="Man">Man</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
 
-          <label>
-            <strong>
-              What is your gender?
-            </strong>
-          </label>
+            <div className="ss-field">
+              <span className="ss-step">Step 4</span>
+              <label htmlFor="socialCategory">
+                What is your social category?
+              </label>
+              <select
+                id="socialCategory"
+                name="socialCategory"
+                value={form.socialCategory}
+                onChange={handleChange}
+                required
+                className="ss-select"
+              >
+                <option value="">
+                  Select category
+                </option>
+                <option value="SC">SC</option>
+                <option value="ST">ST</option>
+                <option value="OBC">OBC</option>
+                <option value="General">General</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
 
-          <select
-            name="gender"
-            value={form.gender}
-            onChange={handleChange}
-            required
-            style={selectStyle}
-          >
-            <option value="">
-              Select gender
-            </option>
+            <div className="ss-field">
+              <span className="ss-step">Step 5</span>
+              <label htmlFor="businessType">
+                What type of business do you have?
+              </label>
+              <select
+                id="businessType"
+                name="businessType"
+                value={form.businessType}
+                onChange={handleChange}
+                required
+                className="ss-select"
+              >
+                <option value="">
+                  Select business type
+                </option>
+                <option value="Manufacturing">
+                  Manufacturing
+                </option>
+                <option value="Services">Services</option>
+                <option value="Trading">Trading</option>
+                <option value="Agriculture">
+                  Agriculture
+                </option>
+                <option value="Technology">
+                  Technology
+                </option>
+              </select>
+            </div>
 
-            <option value="Woman">
-              Woman
-            </option>
-
-            <option value="Man">
-              Man
-            </option>
-
-            <option value="Other">
-              Other
-            </option>
-          </select>
-
-          <label>
-            <strong>
-              What is your social category?
-            </strong>
-          </label>
-
-          <select
-            name="socialCategory"
-            value={form.socialCategory}
-            onChange={handleChange}
-            required
-            style={selectStyle}
-          >
-            <option value="">
-              Select category
-            </option>
-
-            <option value="SC">
-              SC
-            </option>
-
-            <option value="ST">
-              ST
-            </option>
-
-            <option value="OBC">
-              OBC
-            </option>
-
-            <option value="General">
-              General
-            </option>
-
-            <option value="Other">
-              Other
-            </option>
-          </select>
-
-          <label>
-            <strong>
-              What type of business do you have?
-            </strong>
-          </label>
-
-          <select
-            name="businessType"
-            value={form.businessType}
-            onChange={handleChange}
-            required
-            style={selectStyle}
-          >
-            <option value="">
-              Select business type
-            </option>
-
-            <option value="Manufacturing">
-              Manufacturing
-            </option>
-
-            <option value="Services">
-              Services
-            </option>
-
-            <option value="Trading">
-              Trading
-            </option>
-
-            <option value="Agriculture">
-              Agriculture
-            </option>
-
-            <option value="Technology">
-              Technology
-            </option>
-          </select>
-
-          <button
-            type="submit"
-            disabled={
-              loadingSchemes ||
-              schemes.length === 0
-            }
-            style={buttonStyle}
-          >
-            Find Matching Schemes
-          </button>
-        </form>
+            <div className="ss-form-actions">
+              <button
+                type="submit"
+                disabled={
+                  loadingSchemes ||
+                  schemes.length === 0
+                }
+                className="ss-btn ss-btn--primary"
+              >
+                Find my schemes
+              </button>
+            </div>
+          </form>
+        </section>
 
         {searched && (
-          <div style={{ marginTop: "30px" }}>
-            <h2>
-              Matching Schemes ({matches.length})
-            </h2>
+          <section className="ss-section">
+            <div className="ss-results-toolbar">
+              <div className="ss-section-head">
+                <h2>
+                  Matching Schemes ({matches.length})
+                </h2>
+                <p>
+                  Higher scores mean a closer fit to your profile.
+                </p>
+              </div>
 
-            <label>
-              <strong>
-                Explanation language
-              </strong>
-            </label>
-
-            <select
-              value={selectedLanguage}
-              onChange={(event) =>
-                setSelectedLanguage(event.target.value)
-              }
-              style={selectStyle}
-            >
-              <option value="English">
-                English
-              </option>
-              <option value="Hindi">
-                Hindi (हिन्दी)
-              </option>
-              <option value="Bengali">
-                Bengali (বাংলা)
-              </option>
-              <option value="Marathi">
-                Marathi (मराठी)
-              </option>
-              <option value="Tamil">
-                Tamil (தமிழ்)
-              </option>
-              <option value="Assamese">
-                Assamese (অসমীয়া)
-              </option>
-            </select>
+              <div className="ss-field">
+                <label htmlFor="explanation-language">
+                  Explanation language
+                </label>
+                <select
+                  id="explanation-language"
+                  value={selectedLanguage}
+                  onChange={(event) =>
+                    setSelectedLanguage(event.target.value)
+                  }
+                  className="ss-select"
+                >
+                  <option value="English">English</option>
+                  <option value="Hindi">Hindi (हिन्दी)</option>
+                  <option value="Bengali">Bengali (বাংলা)</option>
+                  <option value="Marathi">Marathi (मराठी)</option>
+                  <option value="Tamil">Tamil (தமிழ்)</option>
+                  <option value="Assamese">Assamese (অসমীয়া)</option>
+                </select>
+              </div>
+            </div>
 
             {matches.length === 0 ? (
-              <p>
-                No matching scheme found for this information.
-              </p>
+              <div className="ss-empty">
+                <h3>No matching scheme found</h3>
+                <p>
+                  No matching scheme found for this information.
+                  Try another state spelling or business type.
+                </p>
+              </div>
             ) : (
-              matches.map((scheme) => (
-                <div
-                  key={scheme.id}
-                  style={schemeStyle}
-                >
-                  <h3 style={{ color: "#173b67" }}>
-                    {scheme.name}
-                  </h3>
-
-                  <p
-                    style={{
-                      display: "inline-block",
-                      padding: "8px 12px",
-                      borderRadius: "20px",
-                      backgroundColor: "#dff5e3",
-                      color: "#216e39",
-                      fontWeight: "bold"
-                    }}
+              <div className="ss-scheme-list">
+                {matches.map((scheme) => (
+                  <article
+                    key={scheme.id}
+                    className="ss-scheme"
                   >
-                    Match score: {scheme.matchScore}%
-                  </p>
-
-                  <h4>
-                    Why this matches
-                  </h4>
-
-                  <ul>
-                    {scheme.matchReasons.map(
-                      (reason, index) => (
-                        <li key={index}>
-                          {reason}
-                        </li>
-                      )
-                    )}
-                  </ul>
-
-                  <p>
-                    <strong>
-                      Benefit:
-                    </strong>{" "}
-                    {scheme.benefit}
-                  </p>
-
-                  <p>
-                    <strong>
-                      Eligibility:
-                    </strong>{" "}
-                    {scheme.eligibility}
-                  </p>
-
-                  <p>
-                    <strong>
-                      Documents:
-                    </strong>{" "}
-                    {scheme.documents}
-                  </p>
-
-                  <p>
-                    <strong>
-                      How to apply:
-                    </strong>{" "}
-                    {scheme.howToApply}
-                  </p>
-
-                  {scheme.link !== "#" && (
-                    <a
-                      href={scheme.link}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Visit Official Website
-                    </a>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleSaveScheme(scheme)
-                    }
-                    style={saveSchemeButtonStyle}
-                  >
-                    Save This Scheme
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleExplainScheme(scheme)
-                    }
-                    disabled={
-                      explanationLoading[scheme.id]
-                    }
-                    style={explainButtonStyle}
-                  >
-                    Explain with AI
-                  </button>
-
-                  {explanationLoading[scheme.id] && (
-                    <p style={{ color: "#555" }}>
-                      Generating explanation...
-                    </p>
-                  )}
-
-                  {explanationErrors[scheme.id] && (
-                    <p style={{ color: "#c62828" }}>
-                      {explanationErrors[scheme.id]}
-                    </p>
-                  )}
-
-                  {explanations[scheme.id] && (
-                    <div style={explanationBoxStyle}>
-                      <h4>
-                        AI explanation ({selectedLanguage})
-                      </h4>
-                      <p
-                        style={{
-                          whiteSpace: "pre-wrap"
-                        }}
-                      >
-                        {explanations[scheme.id]}
-                      </p>
+                    <div className="ss-scheme-top">
+                      <h3>{scheme.name}</h3>
+                      <div className="ss-score">
+                        <span>Match score</span>
+                        <strong>{scheme.matchScore}%</strong>
+                      </div>
                     </div>
-                  )}
-                </div>
-              ))
+
+                    <div className="ss-why">
+                      <h4>Why this matches</h4>
+                      <ul>
+                        {scheme.matchReasons.map(
+                          (reason, index) => (
+                            <li key={index}>
+                              {reason}
+                            </li>
+                          )
+                        )}
+                      </ul>
+                    </div>
+
+                    <div className="ss-details">
+                      <div className="ss-detail">
+                        <h4>Benefit</h4>
+                        <p>{scheme.benefit}</p>
+                      </div>
+                      <div className="ss-detail">
+                        <h4>Eligibility</h4>
+                        <p>{scheme.eligibility}</p>
+                      </div>
+                      <div className="ss-detail">
+                        <h4>Documents</h4>
+                        <p>{scheme.documents}</p>
+                      </div>
+                      <div className="ss-detail">
+                        <h4>How to apply</h4>
+                        <p>{scheme.howToApply}</p>
+                      </div>
+                    </div>
+
+                    <div className="ss-scheme-actions">
+                      {scheme.link !== "#" && (
+                        <a
+                          href={scheme.link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="ss-btn ss-btn--ghost"
+                        >
+                          Visit Official Website
+                        </a>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleSaveScheme(scheme)
+                        }
+                        className="ss-btn ss-btn--gold"
+                      >
+                        Save This Scheme
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleExplainScheme(scheme)
+                        }
+                        disabled={
+                          explanationLoading[scheme.id]
+                        }
+                        className="ss-btn ss-btn--primary"
+                      >
+                        Explain with AI
+                      </button>
+                    </div>
+
+                    {explanationLoading[scheme.id] && (
+                      <div className="ss-banner ss-banner--info">
+                        Generating explanation...
+                      </div>
+                    )}
+
+                    {explanationErrors[scheme.id] && (
+                      <div className="ss-banner ss-banner--error">
+                        {explanationErrors[scheme.id]}
+                      </div>
+                    )}
+
+                    {explanations[scheme.id] && (
+                      <div className="ss-explain">
+                        <h4>
+                          AI explanation ({selectedLanguage})
+                        </h4>
+                        <p>
+                          {explanations[scheme.id]}
+                        </p>
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
             )}
-          </div>
+          </section>
         )}
       </div>
     </div>
   );
 }
-
-const centerStyle = {
-  minHeight: "100vh",
-  display: "flex",
-  justifyContent: "center",
-  alignItems: "center",
-  fontFamily: "Arial, sans-serif"
-};
-
-const pageStyle = {
-  minHeight: "100vh",
-  backgroundColor: "#f4f7fb",
-  padding: "40px 20px",
-  fontFamily: "Arial, sans-serif"
-};
-
-const cardStyle = {
-  maxWidth: "750px",
-  margin: "0 auto",
-  backgroundColor: "white",
-  padding: "32px",
-  borderRadius: "16px",
-  boxShadow: "0 4px 20px rgba(0, 0, 0, 0.08)"
-};
-
-const headerStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: "20px"
-};
-
-const headerButtonsStyle = {
-  display: "flex",
-  gap: "8px",
-  flexWrap: "wrap"
-};
-
-const selectStyle = {
-  display: "block",
-  width: "100%",
-  padding: "12px",
-  marginTop: "8px",
-  marginBottom: "24px",
-  borderRadius: "8px",
-  border: "1px solid #bbb",
-  fontSize: "16px",
-  boxSizing: "border-box"
-};
-
-const inputStyle = {
-  display: "block",
-  width: "100%",
-  padding: "12px",
-  marginTop: "8px",
-  marginBottom: "24px",
-  borderRadius: "8px",
-  border: "1px solid #bbb",
-  fontSize: "16px",
-  boxSizing: "border-box"
-};
-
-const buttonStyle = {
-  width: "100%",
-  padding: "14px",
-  backgroundColor: "#1769aa",
-  color: "white",
-  border: "none",
-  borderRadius: "8px",
-  fontSize: "17px",
-  cursor: "pointer"
-};
-
-const savedButtonStyle = {
-  padding: "10px 14px",
-  backgroundColor: "#1769aa",
-  color: "white",
-  border: "none",
-  borderRadius: "8px",
-  cursor: "pointer"
-};
-
-const logoutButtonStyle = {
-  padding: "10px 14px",
-  backgroundColor: "#eeeeee",
-  color: "#333",
-  border: "none",
-  borderRadius: "8px",
-  cursor: "pointer"
-};
-
-const saveSchemeButtonStyle = {
-  display: "block",
-  marginTop: "15px",
-  padding: "10px 16px",
-  backgroundColor: "#f59e0b",
-  color: "white",
-  border: "none",
-  borderRadius: "8px",
-  cursor: "pointer"
-};
-
-const explainButtonStyle = {
-  display: "block",
-  marginTop: "10px",
-  padding: "10px 16px",
-  backgroundColor: "#1769aa",
-  color: "white",
-  border: "none",
-  borderRadius: "8px",
-  cursor: "pointer"
-};
-
-const explanationBoxStyle = {
-  marginTop: "15px",
-  padding: "14px",
-  borderRadius: "8px",
-  backgroundColor: "#ffffff",
-  border: "1px solid #c5d9ec"
-};
-
-const schemeStyle = {
-  border: "1px solid #b8d8f0",
-  borderRadius: "10px",
-  padding: "18px",
-  marginTop: "15px",
-  backgroundColor: "#eef7ff"
-};
 
 export default App;
