@@ -381,6 +381,9 @@ function App() {
   const [explanationErrors, setExplanationErrors] =
     useState({});
 
+  const [selectedLanguage, setSelectedLanguage] =
+    useState("English");
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(
       auth,
@@ -556,7 +559,7 @@ function App() {
           body: JSON.stringify({
             scheme: scheme,
             profile: form,
-            language: "English"
+            language: selectedLanguage
           })
         }
       );
@@ -905,6 +908,36 @@ function App() {
               Matching Schemes ({matches.length})
             </h2>
 
+            <label>
+              <strong>
+                Explanation language
+              </strong>
+            </label>
+
+            <select
+              value={selectedLanguage}
+              onChange={(event) =>
+                setSelectedLanguage(event.target.value)
+              }
+              style={selectStyle}
+            >
+              <option value="English">
+                English
+              </option>
+              <option value="Hindi">
+                Hindi (हिन्दी)
+              </option>
+              <option value="Bengali">
+                Bengali (বাংলা)
+              </option>
+              <option value="Marathi">
+                Marathi (मराठी)
+              </option>
+              <option value="Tamil">
+                Tamil (தமிழ்)
+              </option>
+            </select>
+
             {matches.length === 0 ? (
               <p>
                 No matching scheme found for this information.
@@ -1022,7 +1055,7 @@ function App() {
                   {explanations[scheme.id] && (
                     <div style={explanationBoxStyle}>
                       <h4>
-                        AI explanation
+                        AI explanation ({selectedLanguage})
                       </h4>
                       <p
                         style={{
