@@ -936,6 +936,9 @@ function App() {
               <option value="Tamil">
                 Tamil (தமிழ்)
               </option>
+              <option value="Assamese">
+                Assamese (অসমীয়া)
+              </option>
             </select>
 
             {matches.length === 0 ? (
