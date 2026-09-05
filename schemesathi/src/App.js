@@ -1,1073 +1,216 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
 import Auth from "./Auth";
 import SavedSchemes from "./SavedSchemes";
-
-import {
-  onAuthStateChanged,
-  signOut
-} from "firebase/auth";
-
+import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth, db } from "./firebase";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
-import {
-  doc,
-  setDoc,
-  serverTimestamp
-} from "firebase/firestore";
+const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
+const initialForm = { state: "", age: "", gender: "", socialCategory: "", businessType: "" };
+const languages = ["English", "Hindi", "Bengali", "Marathi", "Tamil", "Assamese"];
 
 function parseMinimumAge(value) {
-  const text = String(value || "");
-  const number = text.match(/\d+/);
-
-  return number ? Number(number[0]) : 0;
+  const match = String(value || "").match(/\d+/);
+  return match ? Number(match[0]) : 0;
 }
 
 function getStates(value) {
   const text = String(value || "").toLowerCase();
-
-  if (
-    text.includes("india") ||
-    /\b(all|any)\b/.test(text) ||
-    text.includes("pan india")
-  ) {
-    return ["ALL"];
-  }
-
-  return String(value)
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
+  if (text.includes("india") || /\b(all|any)\b/.test(text) || text.includes("pan india")) return ["ALL"];
+  return String(value || "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
 }
 
 function getBusinessTypes(value) {
   const text = String(value || "").toLowerCase();
+  if (/\b(any|all)\b/.test(text) || /\ball types?\b/.test(text)) return ["ALL"];
   const types = [];
-
-  if (
-    /\b(any|all)\b/.test(text) ||
-    /\ball types?\b/.test(text)
-  ) {
-    return ["ALL"];
-  }
-
-  if (text.includes("manufactur")) {
-    types.push("Manufacturing");
-  }
-
-  if (
-    text.includes("service") ||
-    text.includes("skill") ||
-    text.includes("training")
-  ) {
-    types.push("Services");
-  }
-
-  if (text.includes("trad")) {
-    types.push("Trading");
-  }
-
-  if (
-    text.includes("agri") ||
-    text.includes("farm") ||
-    text.includes("fisher")
-  ) {
-    types.push("Agriculture");
-  }
-
-  if (
-    text.includes("tech") ||
-    text.includes("startup") ||
-    text.includes("telecom") ||
-    text.includes("ict")
-  ) {
-    types.push("Technology");
-  }
-
-  return types.length > 0 ? types : ["ALL"];
+  if (text.includes("manufactur")) types.push("Manufacturing");
+  if (text.includes("service") || text.includes("skill") || text.includes("training")) types.push("Services");
+  if (text.includes("trad")) types.push("Trading");
+  if (text.includes("agri") || text.includes("farm") || text.includes("fisher")) types.push("Agriculture");
+  if (text.includes("tech") || text.includes("startup") || text.includes("telecom") || text.includes("ict")) types.push("Technology");
+  return types.length ? types : ["ALL"];
 }
 
 function convertCsvRow(row, index) {
   return {
-    id: row["Scheme Name"] || `scheme-${index}`,
-
-    name:
-      row["Scheme Name"] ||
-      "Unnamed Scheme",
-
-    minimumAge: parseMinimumAge(
-      row["Minimum Age"]
-    ),
-
-    states: getStates(
-      row["Target Location"]
-    ),
-
-    businessTypes: getBusinessTypes(
-      row["Business Type / Industry"]
-    ),
-
-    targetGender: String(
-      row["Target Gender"] || ""
-    ).toLowerCase(),
-
-    targetCommunity: String(
-      row["Target Community / Category"] || ""
-    ).toLowerCase(),
-
-    benefit:
-      row["Financial Benefit"] ||
-      "Benefit information unavailable",
-
-    eligibility:
-      row["Plain-Text Eligibility Summary"] ||
-      "Eligibility information unavailable",
-
-    documents:
-      row["Documents Required"] ||
-      "Document information unavailable",
-
-    howToApply:
-      row["How to Apply"] ||
-      "Application information unavailable",
-
-    link:
-      row["Official Link"] ||
-      "#"
+    id: row["Scheme Name"] || "scheme-" + index,
+    name: row["Scheme Name"] || "Unnamed scheme",
+    minimumAge: parseMinimumAge(row["Minimum Age"]),
+    states: getStates(row["Target Location"]),
+    businessTypes: getBusinessTypes(row["Business Type / Industry"]),
+    targetGender: String(row["Target Gender"] || "").toLowerCase(),
+    targetCommunity: String(row["Target Community / Category"] || "").toLowerCase(),
+    benefit: row["Financial Benefit"] || "Benefit information is not listed yet.",
+    eligibility: row["Plain-Text Eligibility Summary"] || "Eligibility information is not listed yet.",
+    documents: row["Documents Required"] || "Document information is not listed yet.",
+    howToApply: row["How to Apply"] || "Application information is not listed yet.",
+    link: row["Official Link"] || "#"
   };
 }
 
 function genderMatches(form, scheme) {
   const text = scheme.targetGender;
-
-  if (
-    !text ||
-    /\b(any|all)\b/.test(text)
-  ) {
-    return true;
-  }
-
-  if (
-    form.gender === "Woman" &&
-    /\b(woman|women|female)\b/.test(text)
-  ) {
-    return true;
-  }
-
-  if (
-    form.gender === "Man" &&
-    /\b(man|men|male)\b/.test(text)
-  ) {
-    return true;
-  }
-
+  if (!text || /\b(any|all)\b/.test(text)) return true;
+  if (form.gender === "Woman" && /\b(woman|women|female)\b/.test(text)) return true;
+  if (form.gender === "Man" && /\b(man|men|male)\b/.test(text)) return true;
   return false;
 }
 
 function categoryMatches(form, scheme) {
   const text = scheme.targetCommunity;
-
-  if (
-    !text ||
-    /\b(any|all)\b/.test(text)
-  ) {
-    return true;
-  }
-
-  if (
-    form.socialCategory === "SC" &&
-    (
-      /\bsc\b/.test(text) ||
-      text.includes("scheduled caste")
-    )
-  ) {
-    return true;
-  }
-
-  if (
-    form.socialCategory === "ST" &&
-    (
-      /\bst\b/.test(text) ||
-      text.includes("scheduled tribe")
-    )
-  ) {
-    return true;
-  }
-
-  if (
-    form.socialCategory === "OBC" &&
-    (
-      /\bobc\b/.test(text) ||
-      text.includes("backward class")
-    )
-  ) {
-    return true;
-  }
-
-  if (
-    form.socialCategory === "General" &&
-    /\bgeneral\b/.test(text)
-  ) {
-    return true;
-  }
-
-  if (
-    form.gender === "Woman" &&
-    /\b(woman|women|female)\b/.test(text)
-  ) {
-    return true;
-  }
-
+  if (!text || /\b(any|all)\b/.test(text)) return true;
+  if (form.socialCategory === "SC" && (/\bsc\b/.test(text) || text.includes("scheduled caste"))) return true;
+  if (form.socialCategory === "ST" && (/\bst\b/.test(text) || text.includes("scheduled tribe"))) return true;
+  if (form.socialCategory === "OBC" && (/\bobc\b/.test(text) || text.includes("backward class"))) return true;
+  if (form.socialCategory === "General" && /\bgeneral\b/.test(text)) return true;
+  if (form.gender === "Woman" && /\b(woman|women|female)\b/.test(text)) return true;
   return false;
-}
-
-function schemeMatches(form, scheme) {
-  const selectedState = form.state
-    .trim()
-    .toLowerCase();
-
-  const stateMatches =
-    scheme.states.includes("ALL") ||
-    scheme.states.includes(selectedState);
-
-  const ageMatches =
-    Number(form.age) >= scheme.minimumAge;
-
-  const businessTypeMatches =
-    scheme.businessTypes.includes("ALL") ||
-    scheme.businessTypes.includes(form.businessType);
-
-  const genderMatchesResult =
-    genderMatches(form, scheme);
-
-  const categoryMatchesResult =
-    categoryMatches(form, scheme);
-
-  return (
-    stateMatches &&
-    ageMatches &&
-    businessTypeMatches &&
-    genderMatchesResult &&
-    categoryMatchesResult
-  );
 }
 
 function getMatchDetails(form, scheme) {
   let score = 0;
   const reasons = [];
-
-  const selectedState = form.state
-    .trim()
-    .toLowerCase();
-
-  const stateMatches =
-    scheme.states.includes("ALL") ||
-    scheme.states.includes(selectedState);
-
-  if (stateMatches) {
+  const state = form.state.trim().toLowerCase();
+  if (scheme.states.includes("ALL") || scheme.states.includes(state)) {
     score += 25;
-
-    if (scheme.states.includes("ALL")) {
-      reasons.push(
-        "This scheme is available across India."
-      );
-    } else {
-      reasons.push(
-        "This scheme is available in your state."
-      );
-    }
+    reasons.push(scheme.states.includes("ALL") ? "Available across India." : "Available in your state.");
   }
-
-  const ageMatches =
-    Number(form.age) >= scheme.minimumAge;
-
-  if (ageMatches) {
+  if (Number(form.age) >= scheme.minimumAge) {
     score += 20;
-
-    if (scheme.minimumAge > 0) {
-      reasons.push(
-        `You meet the minimum age requirement of ${scheme.minimumAge} years.`
-      );
-    } else {
-      reasons.push(
-        "No minimum age restriction was listed."
-      );
-    }
+    reasons.push(scheme.minimumAge ? "You meet the minimum age of " + scheme.minimumAge + " years." : "No minimum age restriction is listed.");
   }
-
-  const businessTypeMatches =
-    scheme.businessTypes.includes("ALL") ||
-    scheme.businessTypes.includes(form.businessType);
-
-  if (businessTypeMatches) {
+  if (scheme.businessTypes.includes("ALL") || scheme.businessTypes.includes(form.businessType)) {
     score += 25;
-    reasons.push(
-      "Your business type is supported."
-    );
+    reasons.push("Your business type is supported.");
   }
-
-  const genderIsMatch =
-    genderMatches(form, scheme);
-
-  if (genderIsMatch) {
+  if (genderMatches(form, scheme)) {
     score += 15;
-
-    if (scheme.targetGender) {
-      reasons.push(
-        "Your gender matches the listed target group."
-      );
-    } else {
-      reasons.push(
-        "No gender restriction was listed."
-      );
-    }
+    reasons.push(scheme.targetGender ? "Your profile fits the listed gender group." : "No gender restriction is listed.");
   }
-
-  const categoryIsMatch =
-    categoryMatches(form, scheme);
-
-  if (categoryIsMatch) {
+  if (categoryMatches(form, scheme)) {
     score += 15;
-
-    if (scheme.targetCommunity) {
-      reasons.push(
-        "Your social category matches the listed target group."
-      );
-    } else {
-      reasons.push(
-        "No social category restriction was listed."
-      );
-    }
+    reasons.push(scheme.targetCommunity ? "Your community category fits the listed group." : "No community restriction is listed.");
   }
+  return { matchScore: Math.min(score, 100), matchReasons: reasons };
+}
 
-  return {
-    matchScore: Math.min(score, 100),
-    matchReasons: reasons
-  };
+function schemeMatches(form, scheme) {
+  const state = form.state.trim().toLowerCase();
+  return (scheme.states.includes("ALL") || scheme.states.includes(state)) &&
+    Number(form.age) >= scheme.minimumAge &&
+    (scheme.businessTypes.includes("ALL") || scheme.businessTypes.includes(form.businessType)) &&
+    genderMatches(form, scheme) && categoryMatches(form, scheme);
+}
+
+function SchemeCard({ scheme, saved, onSave, onDetails, onExplain }) {
+  return <article className="ss-scheme-card" data-testid={"card-scheme-" + scheme.id}>
+    <div className="ss-scheme-topline">
+      <h3 className="ss-scheme-name">{scheme.name}</h3>
+      <button className={"ss-save " + (saved ? "saved" : "")} type="button" onClick={onSave} aria-label={saved ? "Saved " + scheme.name : "Save " + scheme.name} data-testid={"button-save-scheme-" + scheme.id}>{saved ? "♥" : "♡"}</button>
+    </div>
+    <p className="ss-scheme-benefit">{scheme.benefit}</p>
+    <div className="ss-match-row">
+      <div className="ss-match-pip">{scheme.matchScore !== undefined ? scheme.matchScore + "%" : "✓"}</div>
+      <div className="ss-match-copy"><strong>{scheme.matchScore !== undefined ? "Good fit for you" : "Saved for later"}</strong><span>{scheme.matchScore !== undefined ? "Based on your answers" : "Keep this scheme close"}</span></div>
+    </div>
+    <div className="ss-card-actions">
+      <button type="button" className="ss-pill-button ghost" onClick={onDetails} data-testid={"button-details-scheme-" + scheme.id}>See details</button>
+      {scheme.matchScore !== undefined && <button type="button" className="ss-pill-button primary" onClick={onExplain} data-testid={"button-explain-scheme-" + scheme.id}>Explain</button>}
+    </div>
+  </article>;
+}
+
+function SchemeDetail({ scheme, language, explanation, loadingExplanation, explanationError, onExplain, onClose, onSave, saved }) {
+  return <div className="ss-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="ss-modal" role="dialog" aria-modal="true" aria-labelledby="scheme-detail-title">
+      <div className="ss-modal-head"><div><span className="ss-eyebrow"><span className="ss-eyebrow-dot" /> Scheme details</span><h2 id="scheme-detail-title">{scheme.name}</h2></div><button className="ss-modal-close" type="button" onClick={onClose} aria-label="Close details" data-testid="button-close-details">×</button></div>
+      <div className="ss-detail-block"><h4>What you could receive</h4><p>{scheme.benefit}</p></div>
+      <div className="ss-detail-block"><h4>Eligibility</h4><p>{scheme.eligibility}</p></div>
+      <div className="ss-detail-block"><h4>Documents to keep ready</h4><p>{scheme.documents}</p></div>
+      <div className="ss-detail-block"><h4>How to apply</h4><p>{scheme.howToApply}</p></div>
+      {explanation && <div className="ss-explanation" data-testid={"text-explanation-" + scheme.id}><h4>In plain language · {language}</h4><p>{explanation}</p></div>}
+      {explanationError && <div className="ss-alert error" data-testid={"status-explanation-error-" + scheme.id}><span>!</span><span>{explanationError}</span></div>}
+      <div className="ss-card-actions ss-modal-actions">
+        <button type="button" className={"ss-pill-button " + (saved ? "warm" : "ghost")} onClick={onSave} data-testid={"button-detail-save-" + scheme.id}>{saved ? "♥ Saved" : "♡ Save scheme"}</button>
+        <button type="button" className="ss-pill-button primary" onClick={onExplain} disabled={loadingExplanation} data-testid={"button-detail-explain-" + scheme.id}>{loadingExplanation ? "Writing your explanation…" : "Explain in " + language}</button>
+        {scheme.link !== "#" && <a className="ss-pill-button ghost" href={scheme.link} target="_blank" rel="noreferrer" data-testid={"link-official-" + scheme.id}>Official site ↗</a>}
+      </div>
+    </div>
+  </div>;
 }
 
 function App() {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [view, setView] = useState("matcher");
-
-  const [form, setForm] = useState({
-    state: "",
-    age: "",
-    gender: "",
-    socialCategory: "",
-    businessType: ""
-  });
-
+  const [form, setForm] = useState(initialForm);
   const [schemes, setSchemes] = useState([]);
   const [matches, setMatches] = useState([]);
+  const [loadingSchemes, setLoadingSchemes] = useState(true);
+  const [schemeError, setSchemeError] = useState("");
   const [searched, setSearched] = useState(false);
+  const [savedIds, setSavedIds] = useState(new Set());
+  const [explanations, setExplanations] = useState({});
+  const [explanationLoading, setExplanationLoading] = useState({});
+  const [explanationErrors, setExplanationErrors] = useState({});
+  const [selectedLanguage, setSelectedLanguage] = useState("English");
+  const [selectedScheme, setSelectedScheme] = useState(null);
+  const [saveMessage, setSaveMessage] = useState(null);
 
-  const [loadingSchemes, setLoadingSchemes] =
-    useState(true);
-
-  const [schemeError, setSchemeError] =
-    useState("");
-
-  const [saveMessage, setSaveMessage] =
-    useState(null);
-
-  const [explanations, setExplanations] =
-    useState({});
-
-  const [explanationLoading, setExplanationLoading] =
-    useState({});
-
-  const [explanationErrors, setExplanationErrors] =
-    useState({});
-
-  const [selectedLanguage, setSelectedLanguage] =
-    useState("English");
+  useEffect(() => onAuthStateChanged(auth, (currentUser) => { setUser(currentUser); setAuthReady(true); }), []);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(
-      auth,
-      (currentUser) => {
-        setUser(currentUser);
-        setAuthReady(true);
-      }
-    );
-
-    return unsubscribe;
+    fetch("/data/schemes.csv").then((response) => { if (!response.ok) throw new Error("Could not find schemes.csv"); return response.text(); }).then((csvText) => {
+      Papa.parse(csvText, { header: true, skipEmptyLines: true, complete: (result) => { const converted = result.data.map(convertCsvRow).filter((scheme) => scheme.name !== "Unnamed scheme"); setSchemes(converted); setLoadingSchemes(false); }, error: () => { setSchemeError("The scheme file could not be read."); setLoadingSchemes(false); } });
+    }).catch(() => { setSchemeError("The scheme file could not be loaded. Check public/data/schemes.csv."); setLoadingSchemes(false); });
   }, []);
 
-  useEffect(() => {
-    fetch("/data/schemes.csv")
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(
-            "Could not find schemes.csv"
-          );
-        }
-
-        return response.text();
-      })
-      .then((csvText) => {
-        Papa.parse(csvText, {
-          header: true,
-          skipEmptyLines: true,
-
-          complete: (result) => {
-            const convertedSchemes = result.data
-              .map((row, index) =>
-                convertCsvRow(row, index)
-              )
-              .filter(
-                (scheme) =>
-                  scheme.name !== "Unnamed Scheme"
-              );
-
-            setSchemes(convertedSchemes);
-            setLoadingSchemes(false);
-          },
-
-          error: (error) => {
-            console.error(
-              "CSV parsing error:",
-              error
-            );
-
-            setSchemeError(
-              "The scheme file could not be read."
-            );
-
-            setLoadingSchemes(false);
-          }
-        });
-      })
-      .catch((error) => {
-        console.error(
-          "Scheme loading error:",
-          error
-        );
-
-        setSchemeError(
-          "The scheme file could not be loaded. Check public/data/schemes.csv."
-        );
-
-        setLoadingSchemes(false);
-      });
-  }, []);
-
-  function handleChange(event) {
-    setForm({
-      ...form,
-      [event.target.name]: event.target.value
-    });
-  }
-
-  async function handleSubmit(event) {
+  function handleSubmit(event) {
     event.preventDefault();
-
     setSaveMessage(null);
-
-    if (!user || !user.uid) {
-      setSaveMessage({
-        type: "error",
-        text: "Please login before submitting your profile."
-      });
-
-      return;
-    }
-
-    const matchingSchemes = schemes
-      .filter((scheme) =>
-        schemeMatches(form, scheme)
-      )
-      .map((scheme) => ({
-        ...scheme,
-        ...getMatchDetails(form, scheme)
-      }))
-      .sort(
-        (firstScheme, secondScheme) =>
-          secondScheme.matchScore -
-          firstScheme.matchScore
-      );
-
-    setMatches(matchingSchemes);
-    setSearched(true);
-    setExplanations({});
-    setExplanationLoading({});
-    setExplanationErrors({});
-
-    try {
-      await setDoc(
-        doc(db, "users", user.uid),
-        {
-          email: user.email || "",
-
-          profile: {
-            state: form.state,
-            age: form.age,
-            gender: form.gender,
-            socialCategory: form.socialCategory,
-            businessType: form.businessType
-          },
-
-          updatedAt: serverTimestamp()
-        },
-        {
-          merge: true
-        }
-      );
-
-      setSaveMessage({
-        type: "success",
-        text: "Your profile has been saved successfully."
-      });
-    } catch (error) {
-      console.error(
-        "Firestore save error:",
-        error
-      );
-
-      setSaveMessage({
-        type: "error",
-        text:
-          "Profile could not be saved. Firebase error: " +
-          error.code
-      });
-    }
+    const matching = schemes.filter((scheme) => schemeMatches(form, scheme)).map((scheme) => ({ ...scheme, ...getMatchDetails(form, scheme) })).sort((a, b) => b.matchScore - a.matchScore);
+    setMatches(matching); setSearched(true); setExplanations({}); setExplanationLoading({}); setExplanationErrors({});
+    if (!user || !user.uid) { setSaveMessage({ type: "error", text: "Please sign in before saving your profile." }); return; }
+    setDoc(doc(db, "users", user.uid), { email: user.email || "", profile: form, updatedAt: serverTimestamp() }, { merge: true }).then(() => setSaveMessage({ type: "success", text: "Your profile is ready. Here are the schemes that may fit." })).catch((error) => setSaveMessage({ type: "error", text: "Profile could not be saved. Firebase error: " + error.code }));
+    window.setTimeout(() => document.getElementById("results")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }
 
   async function handleExplainScheme(scheme) {
-    const schemeId = scheme.id;
-
-    setExplanationLoading((current) => ({
-      ...current,
-      [schemeId]: true
-    }));
-
-    setExplanationErrors((current) => ({
-      ...current,
-      [schemeId]: ""
-    }));
-
+    setExplanationLoading((current) => ({ ...current, [scheme.id]: true })); setExplanationErrors((current) => ({ ...current, [scheme.id]: "" }));
     try {
-      const response = await fetch(
-        "http://localhost:5000/api/explain",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            scheme: scheme,
-            profile: form,
-            language: selectedLanguage
-          })
-        }
-      );
-
+      const response = await fetch(API_BASE_URL + "/api/explain", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scheme, profile: form, language: selectedLanguage }) });
       const data = await response.json();
-
-      if (!response.ok || !data.explanation) {
-        throw new Error(
-          data.error ||
-            data.details ||
-            "Could not generate an explanation."
-        );
-      }
-
-      setExplanations((current) => ({
-        ...current,
-        [schemeId]: data.explanation
-      }));
-    } catch (error) {
-      console.error(
-        "Explain scheme error:",
-        error
-      );
-
-      const readableError =
-        error.message === "Failed to fetch"
-          ? "Could not reach the explanation server. Make sure the backend is running on port 5000."
-          : error.message ||
-            "The explanation could not be generated. Please try again.";
-
-      setExplanationErrors((current) => ({
-        ...current,
-        [schemeId]: readableError
-      }));
-    } finally {
-      setExplanationLoading((current) => ({
-        ...current,
-        [schemeId]: false
-      }));
-    }
+      if (!response.ok || !data.explanation) throw new Error(data.error || data.details || "Could not generate an explanation.");
+      setExplanations((current) => ({ ...current, [scheme.id]: data.explanation }));
+    } catch (error) { setExplanationErrors((current) => ({ ...current, [scheme.id]: error.message === "Failed to fetch" ? "Could not reach the explanation server. Make sure the backend is running on port 5000." : error.message || "The explanation could not be generated." })); }
+    finally { setExplanationLoading((current) => ({ ...current, [scheme.id]: false })); }
   }
 
   async function handleSaveScheme(scheme) {
+    if (!user || !user.uid) { setSaveMessage({ type: "error", text: "Please sign in before saving a scheme." }); return; }
     try {
-      const safeSchemeId = scheme.id.replace(
-        /[^a-zA-Z0-9_-]/g,
-        "_"
-      );
-
-      await setDoc(
-        doc(
-          db,
-          "users",
-          user.uid,
-          "savedSchemes",
-          safeSchemeId
-        ),
-        {
-          schemeId: scheme.id,
-          name: scheme.name,
-          benefit: scheme.benefit,
-          link: scheme.link,
-          savedAt: serverTimestamp()
-        }
-      );
-
-      setSaveMessage({
-        type: "success",
-        text: `${scheme.name} saved successfully.`
-      });
-    } catch (error) {
-      console.error(
-        "Save scheme error:",
-        error
-      );
-
-      setSaveMessage({
-        type: "error",
-        text: "This scheme could not be saved."
-      });
-    }
+      const safeSchemeId = scheme.id.replace(/[^a-zA-Z0-9_-]/g, "_");
+      await setDoc(doc(db, "users", user.uid, "savedSchemes", safeSchemeId), { schemeId: scheme.id, name: scheme.name, benefit: scheme.benefit, eligibility: scheme.eligibility, documents: scheme.documents, howToApply: scheme.howToApply, link: scheme.link, savedAt: serverTimestamp() });
+      setSavedIds((current) => new Set([...current, scheme.id])); setSaveMessage({ type: "success", text: scheme.name + " is saved for later." });
+    } catch (error) { setSaveMessage({ type: "error", text: "This scheme could not be saved. Firebase error: " + error.code }); }
   }
 
-  async function handleLogout() {
-    try {
-      await signOut(auth);
-      setUser(null);
-      setView("matcher");
-    } catch (error) {
-      console.error(
-        "Logout error:",
-        error
-      );
-    }
-  }
+  async function handleLogout() { try { await signOut(auth); setUser(null); setView("matcher"); } catch (error) { setSaveMessage({ type: "error", text: "Logout could not be completed." }); } }
 
-  if (!authReady) {
-    return (
-      <div className="ss-boot">
-        <div className="ss-boot-dot" />
-        <h2>Checking login...</h2>
-        <p>Preparing a trusted space to find schemes for you.</p>
-      </div>
-    );
-  }
+  if (!authReady) return <div className="ss-boot"><div className="ss-boot-dot" /><h2>Checking login...</h2><p>Preparing a trusted space to find schemes for you.</p></div>;
+  if (!user) return <Auth onLogin={setUser} />;
+  if (view === "saved") return <SavedSchemes user={user} onBack={() => setView("matcher")} />;
 
-  if (!user) {
-    return <Auth onLogin={setUser} />;
-  }
-
-  if (view === "saved") {
-    return (
-      <SavedSchemes
-        user={user}
-        onBack={() => setView("matcher")}
-      />
-    );
-  }
-
-  return (
-    <div className="ss-page">
-      <div className="ss-shell">
-        <header className="ss-nav">
-          <div className="ss-brand">
-            <div className="ss-mark">S</div>
-            <div>
-              <h1>SchemeSaathi</h1>
-              <p className="ss-user">
-                Logged in as: {user.email}
-              </p>
-            </div>
-          </div>
-
-          <div className="ss-nav-actions">
-            <button
-              type="button"
-              onClick={() => setView("saved")}
-              className="ss-btn ss-btn--navy"
-            >
-              Saved Schemes
-            </button>
-
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="ss-btn ss-btn--ghost"
-            >
-              Logout
-            </button>
-          </div>
-        </header>
-
-        <section className="ss-hero">
-          <div>
-            <span className="ss-kicker">
-              Your scheme companion
-            </span>
-            <h2>
-              Find the right government scheme for your business
-            </h2>
-            <p className="ss-hero-copy">
-              Answer a few simple questions about your profile.
-              We will match schemes that may support your work,
-              show why they fit, and help you save the useful ones.
-            </p>
-            <a href="#scheme-profile" className="ss-btn ss-btn--primary">
-              Find my schemes
-            </a>
-          </div>
-
-          <aside className="ss-hero-aside">
-            <h3>Clear, personal matches</h3>
-            <p>
-              See a match score, eligibility notes, documents,
-              official links, and an AI explanation in your language.
-            </p>
-            <p className="ss-hero-stat">
-              {loadingSchemes
-                ? "Loading the scheme library..."
-                : schemeError
-                ? "Scheme library needs attention"
-                : `${schemes.length} schemes ready to match`}
-            </p>
-          </aside>
-        </section>
-
-        {loadingSchemes && (
-          <div className="ss-banner ss-banner--info">
-            Loading schemes...
-          </div>
-        )}
-
-        {schemeError && (
-          <div className="ss-banner ss-banner--error">
-            {schemeError}
-          </div>
-        )}
-
-        {!loadingSchemes && !schemeError && (
-          <div className="ss-banner ss-banner--success">
-            {schemes.length} schemes loaded successfully.
-          </div>
-        )}
-
-        {saveMessage && (
-          <div
-            className={
-              saveMessage.type === "success"
-                ? "ss-banner ss-banner--success"
-                : "ss-banner ss-banner--error"
-            }
-          >
-            {saveMessage.text}
-          </div>
-        )}
-
-        <section id="scheme-profile" className="ss-section">
-          <div className="ss-section-head">
-            <h2>Tell us about you</h2>
-            <p>
-              Five short steps. We use this only to match schemes
-              that fit your state, age, and business.
-            </p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="ss-form">
-            <div className="ss-field">
-              <span className="ss-step">Step 1</span>
-              <label htmlFor="state">
-                Which state are you from?
-              </label>
-              <input
-                id="state"
-                type="text"
-                name="state"
-                value={form.state}
-                onChange={handleChange}
-                required
-                placeholder="Example: Assam"
-                className="ss-input"
-              />
-            </div>
-
-            <div className="ss-field">
-              <span className="ss-step">Step 2</span>
-              <label htmlFor="age">
-                What is your age?
-              </label>
-              <input
-                id="age"
-                type="number"
-                name="age"
-                value={form.age}
-                onChange={handleChange}
-                min="1"
-                required
-                placeholder="Enter your age"
-                className="ss-input"
-              />
-            </div>
-
-            <div className="ss-field">
-              <span className="ss-step">Step 3</span>
-              <label htmlFor="gender">
-                What is your gender?
-              </label>
-              <select
-                id="gender"
-                name="gender"
-                value={form.gender}
-                onChange={handleChange}
-                required
-                className="ss-select"
-              >
-                <option value="">
-                  Select gender
-                </option>
-                <option value="Woman">Woman</option>
-                <option value="Man">Man</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-
-            <div className="ss-field">
-              <span className="ss-step">Step 4</span>
-              <label htmlFor="socialCategory">
-                What is your social category?
-              </label>
-              <select
-                id="socialCategory"
-                name="socialCategory"
-                value={form.socialCategory}
-                onChange={handleChange}
-                required
-                className="ss-select"
-              >
-                <option value="">
-                  Select category
-                </option>
-                <option value="SC">SC</option>
-                <option value="ST">ST</option>
-                <option value="OBC">OBC</option>
-                <option value="General">General</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-
-            <div className="ss-field">
-              <span className="ss-step">Step 5</span>
-              <label htmlFor="businessType">
-                What type of business do you have?
-              </label>
-              <select
-                id="businessType"
-                name="businessType"
-                value={form.businessType}
-                onChange={handleChange}
-                required
-                className="ss-select"
-              >
-                <option value="">
-                  Select business type
-                </option>
-                <option value="Manufacturing">
-                  Manufacturing
-                </option>
-                <option value="Services">Services</option>
-                <option value="Trading">Trading</option>
-                <option value="Agriculture">
-                  Agriculture
-                </option>
-                <option value="Technology">
-                  Technology
-                </option>
-              </select>
-            </div>
-
-            <div className="ss-form-actions">
-              <button
-                type="submit"
-                disabled={
-                  loadingSchemes ||
-                  schemes.length === 0
-                }
-                className="ss-btn ss-btn--primary"
-              >
-                Find my schemes
-              </button>
-            </div>
-          </form>
-        </section>
-
-        {searched && (
-          <section className="ss-section">
-            <div className="ss-results-toolbar">
-              <div className="ss-section-head">
-                <h2>
-                  Matching Schemes ({matches.length})
-                </h2>
-                <p>
-                  Higher scores mean a closer fit to your profile.
-                </p>
-              </div>
-
-              <div className="ss-field">
-                <label htmlFor="explanation-language">
-                  Explanation language
-                </label>
-                <select
-                  id="explanation-language"
-                  value={selectedLanguage}
-                  onChange={(event) =>
-                    setSelectedLanguage(event.target.value)
-                  }
-                  className="ss-select"
-                >
-                  <option value="English">English</option>
-                  <option value="Hindi">Hindi (हिन्दी)</option>
-                  <option value="Bengali">Bengali (বাংলা)</option>
-                  <option value="Marathi">Marathi (मराठी)</option>
-                  <option value="Tamil">Tamil (தமிழ்)</option>
-                  <option value="Assamese">Assamese (অসমীয়া)</option>
-                </select>
-              </div>
-            </div>
-
-            {matches.length === 0 ? (
-              <div className="ss-empty">
-                <h3>No matching scheme found</h3>
-                <p>
-                  No matching scheme found for this information.
-                  Try another state spelling or business type.
-                </p>
-              </div>
-            ) : (
-              <div className="ss-scheme-list">
-                {matches.map((scheme) => (
-                  <article
-                    key={scheme.id}
-                    className="ss-scheme"
-                  >
-                    <div className="ss-scheme-top">
-                      <h3>{scheme.name}</h3>
-                      <div className="ss-score">
-                        <span>Match score</span>
-                        <strong>{scheme.matchScore}%</strong>
-                      </div>
-                    </div>
-
-                    <div className="ss-why">
-                      <h4>Why this matches</h4>
-                      <ul>
-                        {scheme.matchReasons.map(
-                          (reason, index) => (
-                            <li key={index}>
-                              {reason}
-                            </li>
-                          )
-                        )}
-                      </ul>
-                    </div>
-
-                    <div className="ss-details">
-                      <div className="ss-detail">
-                        <h4>Benefit</h4>
-                        <p>{scheme.benefit}</p>
-                      </div>
-                      <div className="ss-detail">
-                        <h4>Eligibility</h4>
-                        <p>{scheme.eligibility}</p>
-                      </div>
-                      <div className="ss-detail">
-                        <h4>Documents</h4>
-                        <p>{scheme.documents}</p>
-                      </div>
-                      <div className="ss-detail">
-                        <h4>How to apply</h4>
-                        <p>{scheme.howToApply}</p>
-                      </div>
-                    </div>
-
-                    <div className="ss-scheme-actions">
-                      {scheme.link !== "#" && (
-                        <a
-                          href={scheme.link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="ss-btn ss-btn--ghost"
-                        >
-                          Visit Official Website
-                        </a>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleSaveScheme(scheme)
-                        }
-                        className="ss-btn ss-btn--gold"
-                      >
-                        Save This Scheme
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleExplainScheme(scheme)
-                        }
-                        disabled={
-                          explanationLoading[scheme.id]
-                        }
-                        className="ss-btn ss-btn--primary"
-                      >
-                        Explain with AI
-                      </button>
-                    </div>
-
-                    {explanationLoading[scheme.id] && (
-                      <div className="ss-banner ss-banner--info">
-                        Generating explanation...
-                      </div>
-                    )}
-
-                    {explanationErrors[scheme.id] && (
-                      <div className="ss-banner ss-banner--error">
-                        {explanationErrors[scheme.id]}
-                      </div>
-                    )}
-
-                    {explanations[scheme.id] && (
-                      <div className="ss-explain">
-                        <h4>
-                          AI explanation ({selectedLanguage})
-                        </h4>
-                        <p>
-                          {explanations[scheme.id]}
-                        </p>
-                      </div>
-                    )}
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
-      </div>
-    </div>
-  );
+  return <div className="ss-app">
+    <header className="ss-container ss-nav"><button className="ss-brand ss-brand-button" type="button" onClick={() => setView("matcher")} data-testid="button-home"><span className="ss-mark">S</span><span><span className="ss-brand-name">SchemeSathi</span><span className="ss-brand-sub">Your next step, made clearer</span></span></button><nav className="ss-nav-links" aria-label="Primary navigation"><button className="ss-nav-link active" type="button" onClick={() => setView("matcher")} data-testid="button-find-schemes">Find schemes</button><button className="ss-nav-link" type="button" onClick={() => setView("saved")} data-testid="button-saved-schemes">Saved</button></nav><div className="ss-account"><button type="button" className="ss-user-chip" onClick={handleLogout} title="Sign out" data-testid="button-sign-out"><span className="ss-avatar">{(user.email || "U").slice(0, 1).toUpperCase()}</span><span className="ss-user-label">{user.email}</span><span>↪</span></button></div></header>
+    <main>
+      <section className="ss-container ss-hero"><div className="ss-hero-copy"><span className="ss-eyebrow"><span className="ss-eyebrow-dot" /> A more human way to find support</span><h1>Good work deserves a <em>fair start.</em></h1><p className="ss-hero-lede">Tell us a little about yourself and your work. SchemeSathi quietly looks through government support and brings the most relevant next steps to you.</p><div className="ss-hero-actions"><a href="#scheme-profile" className="ss-pill-button primary" data-testid="link-start-matcher">Find my schemes →</a><span className="ss-trust-note">Free to use · no paperwork here</span></div></div><div className="ss-art" aria-label="Abstract illustration of growth"><div className="ss-art-halo" /><div className="ss-art-leaf" /><div className="ss-art-petal one" /><div className="ss-art-petal two" /><div className="ss-art-petal three" /><div className="ss-art-sun" /><div className="ss-art-card"><span>Your match, made clearer</span><strong>Stand-Up India</strong><div className="ss-art-card-bar"><i /></div></div></div></section>
+      <section className="ss-section soft" id="scheme-profile"><div className="ss-container"><div className="ss-section-head"><div><span className="ss-eyebrow"><span className="ss-eyebrow-dot" /> Takes about two minutes</span><h2 className="ss-section-title">Start with what matters.</h2></div><p className="ss-section-description">No jargon, no wrong answers. We only use these details to make your shortlist more useful.</p></div>{saveMessage && <div className={"ss-alert " + saveMessage.type} data-testid={"status-profile-" + saveMessage.type}><span>{saveMessage.type === "success" ? "✓" : "!"}</span><span>{saveMessage.text}</span></div>}{loadingSchemes && <div className="ss-form-card"><div className="ss-skeleton" /></div>}{schemeError && <div className="ss-alert error"><span>!</span><span>{schemeError}</span></div>}{!loadingSchemes && !schemeError && <form className="ss-form-card" onSubmit={handleSubmit}><div className="ss-stepper"><div className="ss-step"><div className="ss-step-bar"><span style={{ width: "100%" }} /></div><div className="ss-step-label">1 · state</div></div><div className="ss-step"><div className="ss-step-bar" /><div className="ss-step-label">2 · age</div></div><div className="ss-step"><div className="ss-step-bar" /><div className="ss-step-label">3 · profile</div></div><div className="ss-step"><div className="ss-step-bar" /><div className="ss-step-label">4 · category</div></div><div className="ss-step"><div className="ss-step-bar" /><div className="ss-step-label">5 · business</div></div></div><div className="ss-form-grid"><label className="ss-form-field"><span>State</span><input className="ss-input" type="text" name="state" value={form.state} onChange={(event) => setForm({ ...form, state: event.target.value })} required placeholder="For example, Assam" data-testid="input-state" /></label><label className="ss-form-field"><span>Age</span><input className="ss-input" type="number" name="age" value={form.age} onChange={(event) => setForm({ ...form, age: event.target.value })} min="1" required placeholder="Your age" data-testid="input-age" /></label><label className="ss-form-field"><span>Gender</span><select className="ss-select" name="gender" value={form.gender} onChange={(event) => setForm({ ...form, gender: event.target.value })} required data-testid="select-gender"><option value="">Choose one</option><option value="Woman">Woman</option><option value="Man">Man</option><option value="Other">Other</option></select></label><label className="ss-form-field"><span>Social category</span><select className="ss-select" name="socialCategory" value={form.socialCategory} onChange={(event) => setForm({ ...form, socialCategory: event.target.value })} required data-testid="select-social-category"><option value="">Choose one</option><option value="SC">SC</option><option value="ST">ST</option><option value="OBC">OBC</option><option value="General">General</option><option value="Other">Other</option></select></label><label className="ss-form-field"><span>Business type</span><select className="ss-select" name="businessType" value={form.businessType} onChange={(event) => setForm({ ...form, businessType: event.target.value })} required data-testid="select-business-type"><option value="">Choose one</option><option value="Manufacturing">Manufacturing</option><option value="Services">Services</option><option value="Trading">Trading</option><option value="Agriculture">Agriculture</option><option value="Technology">Technology</option></select></label></div><div className="ss-form-footer"><span className="ss-helper">Your answers stay private to your account.</span><button type="submit" className="ss-pill-button primary" disabled={schemes.length === 0} data-testid="button-submit-matcher">Show my matches →</button></div></form>}</div></section>
+      {searched && <section className="ss-section" id="results"><div className="ss-container"><div className="ss-results-head"><div><span className="ss-eyebrow"><span className="ss-eyebrow-dot" /> Your shortlist</span><h2 className="ss-section-title">A few doors worth opening.</h2><p className="ss-results-count" data-testid="text-results-count">{matches.length} possible matches</p></div><select className="ss-language" value={selectedLanguage} onChange={(event) => setSelectedLanguage(event.target.value)} aria-label="Explanation language" data-testid="select-language">{languages.map((item) => <option key={item}>{item}</option>)}</select></div>{matches.length === 0 ? <div className="ss-empty"><div className="ss-empty-icon">?</div><h3>Nothing close enough yet</h3><p>Try another state spelling or a broader business type. Your answers can be changed above.</p></div> : <div className="ss-scheme-grid">{matches.map((scheme) => <SchemeCard key={scheme.id} scheme={scheme} saved={savedIds.has(scheme.id)} onSave={() => handleSaveScheme(scheme)} onDetails={() => setSelectedScheme(scheme)} onExplain={() => { setSelectedScheme(scheme); handleExplainScheme(scheme); }} />)}</div>}</div></section>}
+    </main><footer className="ss-container ss-footer"><span>SchemeSathi · a clearer path to support</span><span>India-wide catalogue, thoughtfully simplified</span></footer>{selectedScheme && <SchemeDetail scheme={selectedScheme} language={selectedLanguage} explanation={explanations[selectedScheme.id] || ""} loadingExplanation={Boolean(explanationLoading[selectedScheme.id])} explanationError={explanationErrors[selectedScheme.id] || ""} onExplain={() => handleExplainScheme(selectedScheme)} onClose={() => setSelectedScheme(null)} onSave={() => handleSaveScheme(selectedScheme)} saved={savedIds.has(selectedScheme.id)} />}
+  </div>;
 }
 
 export default App;
