@@ -63,51 +63,90 @@ Rules:
 - Keep the explanation practical and easy to understand.
 `;
 
-    const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": process.env.GEMINI_API_KEY
-        },
-        body: JSON.stringify({
-          system_instruction: {
-            parts: [
-              {
-                text: "You are SchemeSaathi, a careful assistant for Indian entrepreneurs."
-              }
-            ]
-          },
-          contents: [
-            {
-              role: "user",
-              parts: [
+    let geminiResponse;
+    let data;
+    let explanation;
+    const maxRetries = 2;
+    const delays = [1000, 3000];
+    let attempt = 0;
+
+    while (attempt <= maxRetries) {
+      try {
+        geminiResponse = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": process.env.GEMINI_API_KEY
+            },
+            body: JSON.stringify({
+              system_instruction: {
+                parts: [
+                  {
+                    text: "You are SchemeSaathi, a careful assistant for Indian entrepreneurs."
+                  }
+                ]
+              },
+              contents: [
                 {
-                  text: prompt
+                  role: "user",
+                  parts: [
+                    {
+                      text: prompt
+                    }
+                  ]
                 }
               ]
-            }
-          ]
-        })
+            })
+          }
+        );
+
+        data = await geminiResponse.json();
+
+        if (geminiResponse.ok) {
+          explanation = data.candidates?.[0]?.content?.parts
+            ?.map((part) => part.text)
+            .filter(Boolean)
+            .join("\n");
+          break;
+        }
+
+        console.error(`Gemini API error (attempt ${attempt + 1}):`, data);
+        const status = geminiResponse.status;
+
+        const retriableStatuses = [429, 500, 502, 503, 504];
+        if (retriableStatuses.includes(status)) {
+          if (attempt < maxRetries) {
+            const delay = delays[attempt];
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            attempt++;
+            continue;
+          } else {
+            return res.status(503).json({
+              error: "Gemini is temporarily busy. Please try again in a moment."
+            });
+          }
+        } else {
+          return res.status(502).json({
+            error: "Gemini request failed",
+            details: data.error?.message || "Unknown Gemini API error"
+          });
+        }
+      } catch (err) {
+        console.error(`Gemini fetch error (attempt ${attempt + 1}):`, err);
+        if (attempt < maxRetries) {
+          const delay = delays[attempt];
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          attempt++;
+          continue;
+        } else {
+          return res.status(503).json({
+            error: "Gemini is temporarily busy. Please try again in a moment."
+          });
+        }
       }
-    );
-
-    const data = await geminiResponse.json();
-
-    if (!geminiResponse.ok) {
-      console.error("Gemini API error:", data);
-
-      return res.status(502).json({
-        error: "Gemini request failed",
-        details: data.error?.message || "Unknown Gemini API error"
-      });
     }
-
-    const explanation = data.candidates?.[0]?.content?.parts
-      ?.map((part) => part.text)
-      .filter(Boolean)
-      .join("\n");
 
     if (!explanation) {
       return res.status(502).json({
