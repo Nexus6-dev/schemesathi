@@ -8,8 +8,121 @@ const express = require("express");
 const cors = require("cors");
 
 const app = express();
-const PORT = process.env.PORT || 5000;
-const GEMINI_MODEL = "gemini-3.6-flash";
+
+const PORT = Number(process.env.PORT) || 5000;
+
+const GEMINI_MODELS = [
+  process.env.GEMINI_MODEL || "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-2.5-flash-lite"
+].filter(
+  (model, index, models) =>
+    models.indexOf(model) === index
+);
+
+let geminiClientPromise = null;
+
+function getGeminiClient() {
+  if (!geminiClientPromise) {
+    geminiClientPromise = import("@google/genai").then(
+      ({ GoogleGenAI }) => {
+        const apiKey =
+          process.env.GEMINI_API_KEY?.trim();
+
+        if (!apiKey) {
+          throw new Error(
+            "GEMINI_API_KEY is missing from server/.env"
+          );
+        }
+
+        return new GoogleGenAI({
+          apiKey
+        });
+      }
+    );
+  }
+
+  return geminiClientPromise;
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
+function getErrorStatus(error) {
+  const directStatus = Number(
+    error?.status || error?.code
+  );
+
+  if (Number.isInteger(directStatus)) {
+    return directStatus;
+  }
+
+  const message = String(
+    error?.message || error || ""
+  );
+
+  const match = message.match(
+    /\b(401|403|429|500|502|503|504)\b/
+  );
+
+  return match ? Number(match[1]) : null;
+}
+
+function isTemporaryError(error) {
+  const status = getErrorStatus(error);
+
+  if (
+    [429, 500, 502, 503, 504].includes(status)
+  ) {
+    return true;
+  }
+
+  const message = String(
+    error?.message || error || ""
+  ).toLowerCase();
+
+  return (
+    message.includes("unavailable") ||
+    message.includes("high demand") ||
+    message.includes("temporarily busy") ||
+    message.includes("resource exhausted") ||
+    message.includes("rate limit")
+  );
+}
+
+function extractInteractionText(interaction) {
+  if (
+    typeof interaction?.output_text ===
+    "string"
+  ) {
+    return interaction.output_text.trim();
+  }
+
+  if (Array.isArray(interaction?.outputs)) {
+    return interaction.outputs
+      .map((output) => {
+        if (typeof output?.text === "string") {
+          return output.text;
+        }
+
+        if (Array.isArray(output?.content)) {
+          return output.content
+            .map((part) => part?.text || "")
+            .join("");
+        }
+
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  }
+
+  return "";
+}
 
 app.use(cors());
 app.use(express.json());
@@ -17,17 +130,25 @@ app.use(express.json());
 app.get("/api/health", (req, res) => {
   res.json({
     success: true,
-    message: "SchemeSaathi backend is working"
+    message: "SchemeSathi backend is working"
   });
 });
 
 app.post("/api/explain", async (req, res) => {
   try {
-    const { scheme, profile, language = "English" } = req.body;
+    const {
+      scheme,
+      profile,
+      language = "English"
+    } = req.body || {};
 
-    if (!process.env.GEMINI_API_KEY) {
+    const apiKey =
+      process.env.GEMINI_API_KEY?.trim();
+
+    if (!apiKey) {
       return res.status(500).json({
-        error: "GEMINI_API_KEY is missing from server/.env"
+        error:
+          "GEMINI_API_KEY is missing from server/.env"
       });
     }
 
@@ -63,110 +184,120 @@ Rules:
 - Keep the explanation practical and easy to understand.
 `;
 
-    let geminiResponse;
-    let data;
-    let explanation;
-    const maxRetries = 2;
-    const delays = [1000, 3000];
-    let attempt = 0;
+    const ai = await getGeminiClient();
 
-    while (attempt <= maxRetries) {
+    let explanation = "";
+    let lastErrorMessage = "";
+
+    for (
+      let attempt = 0;
+      attempt < GEMINI_MODELS.length;
+      attempt++
+    ) {
+      const model = GEMINI_MODELS[attempt];
+
       try {
-        geminiResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-goog-api-key": process.env.GEMINI_API_KEY
-            },
-            body: JSON.stringify({
-              system_instruction: {
-                parts: [
-                  {
-                    text: "You are SchemeSaathi, a careful assistant for Indian entrepreneurs."
-                  }
-                ]
-              },
-              contents: [
-                {
-                  role: "user",
-                  parts: [
-                    {
-                      text: prompt
-                    }
-                  ]
-                }
-              ]
-            })
-          }
+        console.log(
+          `Trying Gemini model: ${model}`
         );
 
-        data = await geminiResponse.json();
+        const interaction =
+          await ai.interactions.create({
+            model,
+            input: `
+You are SchemeSathi, a careful assistant
+for marginalized entrepreneurs in India.
 
-        if (geminiResponse.ok) {
-          explanation = data.candidates?.[0]?.content?.parts
-            ?.map((part) => part.text)
-            .filter(Boolean)
-            .join("\n");
+${prompt}
+            `
+          });
+
+        explanation =
+          extractInteractionText(interaction);
+
+        if (explanation) {
           break;
         }
 
-        console.error(`Gemini API error (attempt ${attempt + 1}):`, data);
-        const status = geminiResponse.status;
+        lastErrorMessage =
+          "Gemini returned no explanation.";
+      } catch (error) {
+        const status = getErrorStatus(error);
 
-        const retriableStatuses = [429, 500, 502, 503, 504];
-        if (retriableStatuses.includes(status)) {
-          if (attempt < maxRetries) {
-            const delay = delays[attempt];
-            await new Promise((resolve) => setTimeout(resolve, delay));
-            attempt++;
-            continue;
-          } else {
-            return res.status(503).json({
-              error: "Gemini is temporarily busy. Please try again in a moment."
-            });
+        lastErrorMessage =
+          error?.message ||
+          "Unknown Gemini error";
+
+        console.error(
+          `Gemini error from ${model}:`,
+          {
+            status,
+            message: lastErrorMessage
           }
-        } else {
+        );
+
+        if (!isTemporaryError(error)) {
           return res.status(502).json({
             error: "Gemini request failed",
-            details: data.error?.message || "Unknown Gemini API error"
+            details: lastErrorMessage
           });
         }
-      } catch (err) {
-        console.error(`Gemini fetch error (attempt ${attempt + 1}):`, err);
-        if (attempt < maxRetries) {
-          const delay = delays[attempt];
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          attempt++;
-          continue;
-        } else {
-          return res.status(503).json({
-            error: "Gemini is temporarily busy. Please try again in a moment."
-          });
-        }
+      }
+
+      if (
+        !explanation &&
+        attempt < GEMINI_MODELS.length - 1
+      ) {
+        const delay =
+          1500 * Math.pow(2, attempt);
+
+        console.log(
+          `Waiting ${delay}ms before trying the next model...`
+        );
+
+        await sleep(delay);
       }
     }
 
     if (!explanation) {
-      return res.status(502).json({
-        error: "Gemini returned no explanation"
+      return res.status(503).json({
+        error:
+          "Gemini is temporarily busy. Please try again shortly.",
+        details: lastErrorMessage
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       explanation
     });
   } catch (error) {
-    console.error("Explanation error:", error);
+    console.error("Explanation error:", {
+      message: error?.message,
+      status: getErrorStatus(error)
+    });
 
-    res.status(500).json({
-      error: "Could not generate scheme explanation"
+    return res.status(500).json({
+      error:
+        "Could not generate scheme explanation",
+      details:
+        error?.message || "Unknown server error"
     });
   }
-});console.log("Gemini key loaded:", Boolean(process.env.GEMINI_API_KEY));
+});
+
+console.log(
+  "Gemini key loaded:",
+  Boolean(process.env.GEMINI_API_KEY?.trim())
+);
+
+console.log(
+  "Gemini fallback models:",
+  GEMINI_MODELS.join(", ")
+);
 
 app.listen(PORT, () => {
-  console.log(`Backend running at http://localhost:${PORT}`);
+  console.log(
+    `Backend running at http://localhost:${PORT}`
+  );
 });
